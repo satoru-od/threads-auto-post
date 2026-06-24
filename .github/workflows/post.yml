@@ -1,6 +1,8 @@
 name: Post to Threads
 
 on:
+  schedule:
+    - cron: "0 22 * * *" # 日本時間 毎朝7:00
   workflow_dispatch:
 
 jobs:
