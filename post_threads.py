@@ -1,30 +1,70 @@
+import csv
 import os
 import requests
-import json
+from datetime import datetime, timezone, timedelta
 
-ACCESS_TOKEN = os.environ["THREADS_ACCESS_TOKEN"]
+CSV_FILE = "posts.csv"
+
 THREADS_USER_ID = os.environ["THREADS_USER_ID"]
+THREADS_ACCESS_TOKEN = os.environ["THREADS_ACCESS_TOKEN"]
 
-print("THREADS_USER_ID length:", len(THREADS_USER_ID))
-print("THREADS_USER_ID head:", THREADS_USER_ID[:5])
+JST = timezone(timedelta(hours=9))
 
-me = requests.get(
-    "https://graph.threads.net/v1.0/me",
-    params={
-        "fields": "id,username",
-        "access_token": ACCESS_TOKEN,
+
+def now_jst():
+    return datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S")
+
+
+with open(CSV_FILE, newline="", encoding="utf-8-sig") as f:
+    rows = list(csv.DictReader(f))
+
+target_index = None
+
+for i, row in enumerate(rows):
+    if not row.get("posted_at", "").strip():
+        target_index = i
+        break
+
+if target_index is None:
+    print("未投稿の行がありません。")
+    raise SystemExit(0)
+
+target = rows[target_index]
+text = target["text"]
+
+create = requests.post(
+    f"https://graph.threads.net/v1.0/{THREADS_USER_ID}/threads",
+    data={
+        "media_type": "TEXT",
+        "text": text,
+        "access_token": THREADS_ACCESS_TOKEN,
     },
 )
 
-print("ME status:", me.status_code)
-print(json.dumps(me.json(), ensure_ascii=False, indent=2))
-me.raise_for_status()
+print("Create status:", create.status_code)
+print("Create response:", create.text)
+create.raise_for_status()
 
-real_id = str(me.json()["id"])
-print("ME id length:", len(real_id))
-print("ME id head:", real_id[:5])
+creation_id = create.json()["id"]
 
-if THREADS_USER_ID != real_id:
-    raise SystemExit("THREADS_USER_ID is different from token's /me id. Update GitHub Secret THREADS_USER_ID.")
+publish = requests.post(
+    f"https://graph.threads.net/v1.0/{THREADS_USER_ID}/threads_publish",
+    data={
+        "creation_id": creation_id,
+        "access_token": THREADS_ACCESS_TOKEN,
+    },
+)
 
-print("THREADS_USER_ID is correct.")
+print("Publish status:", publish.status_code)
+print("Publish response:", publish.text)
+publish.raise_for_status()
+
+rows[target_index]["posted_at"] = now_jst()
+
+with open(CSV_FILE, "w", newline="", encoding="utf-8-sig") as f:
+    writer = csv.DictWriter(f, fieldnames=["date", "text", "posted_at"])
+    writer.writeheader()
+    writer.writerows(rows)
+
+print("投稿成功:", text)
+print("posted_at:", rows[target_index]["posted_at"])
